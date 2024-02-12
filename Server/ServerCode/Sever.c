@@ -95,7 +95,7 @@ int main()
         fprintf(stderr, "Socket crafting failed - Error: %d\n", WSAGetLastError());
         return 1;
     }
-    // Optionally set master socket to allow multiple connections
+    // Step 2: set master socket to allow multiple connections
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0)
     {
         fprintf(stderr, "Setsockopt failed - Error: %d\n", WSAGetLastError());
@@ -103,7 +103,7 @@ int main()
         WSACleanup();
         return 1;
     }
-    // Step 2: Binding the Socket
+    // Step 3: Binding the Socket
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY; // Listen to any IP address
     address.sin_port = htons(PORT);       // Host TO Network Short byte order
@@ -117,7 +117,7 @@ int main()
         return 1;
     }
 
-    // Step 3: Listening for Incoming Connections
+    // Step 4: Listening for Incoming Connections
     if (listen(server_fd, BACKLOG) == SOCKET_ERROR)
     {
         fprintf(stderr, "Listen has failed - Error: %d\n", WSAGetLastError());
@@ -128,6 +128,7 @@ int main()
 
     printf("Server is listening on port %d\n", PORT);
 
+    // Step 5: await connections and listen on the port.
     while (1)
     {
         printf("awaiting new connection...\n");
