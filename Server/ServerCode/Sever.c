@@ -33,33 +33,44 @@ char *reverse_echo_serve(const char *str)
     return reversed_str;
 }
 
-// Thread function to handle client communication
-void *handle_client(void *socket)
-{
+void *handle_client(void *socket) {
     int sock = *(int *)socket;
-    free(socket);
+    free(socket); // Free the dynamically allocated memory for the socket
     char buffer[1024] = {0};
-    /* the received client data */
+
+    // Receive client data
     int valread = recv(sock, buffer, sizeof(buffer), 0);
-    if (valread <= 0)
-    {
+    if (valread <= 0) {
         fprintf(stderr, "recv failed with error: %d\n", WSAGetLastError());
         closesocket(sock);
         return NULL;
     }
 
-    char *reversed_str = reverse_echo_serve(buffer);
-    if (reversed_str == NULL)
-    {
-        // if the handling of the reverse has failed, error out.
-        closesocket(sock);
-        return NULL;
+    // Null-terminate the received data to safely use string functions
+    buffer[valread] = '\0';
+
+    // Check if the received string is "fin"
+    if (strcmp(buffer, "fin") == 0) {
+        // If "fin" is received, send "nif" back to the client
+        const char* nif = "nif";
+        send(sock, nif, strlen(nif), 0);
+        closesocket(sock); // Close the socket to terminate the connection
+        return NULL; // Exit the thread function
+    } else {
+        // Proceed with the original logic if the message is not "fin"
+        char *reversed_str = reverse_echo_serve(buffer);
+        if (reversed_str == NULL) {
+            // Handling of the reverse has failed
+            closesocket(sock);
+            return NULL;
+        }
+
+        // Send the reversed string back to the client
+        send(sock, reversed_str, strlen(reversed_str), 0);
+        free(reversed_str); // Free the dynamically allocated reversed string
     }
 
-    // Send the reverse string back to the client
-    send(sock, reversed_str, strlen(reversed_str), 0);
-    free(reversed_str);
-    closesocket(sock);
+    closesocket(sock); // Close the socket after sending the response
     return NULL;
 }
 
