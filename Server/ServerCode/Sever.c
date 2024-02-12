@@ -8,7 +8,8 @@
 #define PORT 8080
 #define BACKLOG 5 // How many pending connections queue will hold
 
-// unsigned __stdcall handle_client(void *socket);
+//global vars
+volatile int serverRunning = 1;
 
 // UTF-8 string reversal function
 char *reverse_echo_serve(const char *str)
@@ -51,11 +52,13 @@ void *handle_client(void *socket) {
 
     // Check if the received string is "fin"
     if (strcmp(buffer, "fin") == 0) {
-        // If "fin" is received, send "nif" back to the client
+        /* 
+        If "fin" is received, send "nif" back to the client
+        This process can take a few moments to finsh, as the win clean up does have to complete first.
+         */
         const char* nif = "nif";
         send(sock, nif, strlen(nif), 0);
-        closesocket(sock); // Close the socket to terminate the connection
-        return NULL; // Exit the thread function
+        serverRunning = 0;
     } else {
         // Proceed with the original logic if the message is not "fin"
         char *reversed_str = reverse_echo_serve(buffer);
@@ -138,15 +141,17 @@ int main()
     }
 
     printf("Server is listening on port %d\n", PORT);
-
+    
     // Step 5: await connections and listen on the port.
-    while (1)
+    while (serverRunning)
     {
         printf("awaiting new connection...\n");
         if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) == INVALID_SOCKET)
         {
             fprintf(stderr, "Accept failed with error: %d\n", WSAGetLastError());
             continue;
+        } else {
+            if (!serverRunning) break; // Exit loop if server is stopping
         }
 
         int *new_sock = malloc(sizeof(int));
@@ -164,7 +169,8 @@ int main()
             CloseHandle((HANDLE)threadHandle);
         }
     }
-
+    closesocket(server_fd);
     WSACleanup();
+    printf("Server shut down.\n");
     return 0;
 }
