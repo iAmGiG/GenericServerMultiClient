@@ -8,7 +8,7 @@
 #define PORT 8080
 #define BACKLOG 5 // How many pending connections queue will hold
 
-//global vars
+// global vars
 volatile int serverRunning = 1;
 
 // UTF-8 string reversal function
@@ -34,14 +34,16 @@ char *reverse_echo_serve(const char *str)
     return reversed_str;
 }
 
-void *handle_client(void *socket) {
+void *handle_client(void *socket)
+{
     int sock = *(int *)socket;
     free(socket); // Free the dynamically allocated memory for the socket
     char buffer[1024] = {0};
 
     // Receive client data
     int valread = recv(sock, buffer, sizeof(buffer), 0);
-    if (valread <= 0) {
+    if (valread <= 0)
+    {
         fprintf(stderr, "recv failed with error: %d\n", WSAGetLastError());
         closesocket(sock);
         return NULL;
@@ -51,18 +53,22 @@ void *handle_client(void *socket) {
     buffer[valread] = '\0';
 
     // Check if the received string is "fin"
-    if (strcmp(buffer, "fin") == 0) {
-        /* 
+    if (strcmp(buffer, "fin") == 0)
+    {
+        /*
         If "fin" is received, send "nif" back to the client
         This process can take a few moments to finsh, as the win clean up does have to complete first.
          */
-        const char* nif = "nif";
+        const char *nif = "nif";
         send(sock, nif, strlen(nif), 0);
         serverRunning = 0;
-    } else {
+    }
+    else
+    {
         // Proceed with the original logic if the message is not "fin"
         char *reversed_str = reverse_echo_serve(buffer);
-        if (reversed_str == NULL) {
+        if (reversed_str == NULL)
+        {
             // Handling of the reverse has failed
             closesocket(sock);
             return NULL;
@@ -119,8 +125,18 @@ int main()
     }
     // Step 3: Binding the Socket
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY; // Listen to any IP address
-    address.sin_port = htons(PORT);       // Host TO Network Short byte order
+    /*
+    address.sin_addr.s_addr = INADDR_ANY; This was for testing, now to specifiy the IP on the localhost.
+    Listen to any IP address.
+     */
+    address.sin_port = htons(PORT); // Host TO Network Short byte order
+    if (inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) <= 0)
+    {
+        fprintf(stderr, "Invalid address/ Address not supported \n");
+        closesocket(server_fd);
+        WSACleanup();
+        return 1;
+    }
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) == SOCKET_ERROR)
     {
@@ -140,8 +156,11 @@ int main()
         return 1;
     }
 
-    printf("Server is listening on port %d\n", PORT);
-    
+    char ipStr[INET_ADDRSTRLEN];                                   // Buffer to store the human-readable IP address
+    inet_ntop(AF_INET, &address.sin_addr, ipStr, INET_ADDRSTRLEN); // Convert the IP to a string
+
+    printf("Server is listening on IP %s, with port %d\n", ipStr, PORT);
+
     // Step 5: await connections and listen on the port.
     while (serverRunning)
     {
@@ -150,8 +169,11 @@ int main()
         {
             fprintf(stderr, "Accept failed with error: %d\n", WSAGetLastError());
             continue;
-        } else {
-            if (!serverRunning) break; // Exit loop if server is stopping
+        }
+        else
+        {
+            if (!serverRunning)
+                break; // Exit loop if server is stopping
         }
 
         int *new_sock = malloc(sizeof(int));
