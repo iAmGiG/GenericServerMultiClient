@@ -14,7 +14,7 @@
             "cStandard": "c17",
             "cppStandard": "c++17",
             "intelliSenseMode": "windows-gcc-x64",
-            "compilerPath": "C:/Users/gigac/Documents/ToolsAndSoftware/mingw/13_2_0_POSIX/mingw64/bin/gcc.exe"
+            "compilerPath": "${env:PATH}" // your compiler path.
         }
     ],
     "version": 4

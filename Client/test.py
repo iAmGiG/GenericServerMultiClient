@@ -1,17 +1,17 @@
 import unittest
-from unittest.mock import patch
 import Client
 
 
 class TestClient(unittest.TestCase):
-    @patch('client.socket.socket')
-    def test_send_receive_message(self, mock_socket):
-        mock_socket_instance = mock_socket.return_value
-        mock_socket_instance.recv.return_value = b'olleH'
-
+    def test_send_receive_message(self):
+        message = "Hello"
+        print(f"Sent message:  {message}")
         sock = Client.connect_to_server('localhost', 8080)
-        Client.send_message(sock, 'Hello')
+        Client.send_message(sock, message)
         response = Client.receive_message(sock)
+        Client.close_connection(sock)
+
+        print(f"Received message: {response}")
 
         self.assertEqual(response, 'olleH')
 

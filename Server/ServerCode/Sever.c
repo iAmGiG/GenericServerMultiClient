@@ -4,13 +4,15 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <process.h>
+#include <windows.h>
 
 #define PORT 8080
 #define BACKLOG 5 // How many pending connections queue will hold
 
-// unsigned __stdcall handle_client(void *socket);
+// global vars
+volatile int serverRunning = 1;
 
-// UTF-8 string reversal function
+// String reversal function
 char *reverse_echo_serve(const char *str)
 {
     int len = strlen(str);
@@ -30,16 +32,20 @@ char *reverse_echo_serve(const char *str)
     // Insert the null terminator at the end of the string
     reversed_str[len] = '\0';
 
+    // Log the conversion
+    printf("Converting '%s' to '%s'\n", str, reversed_str);
+
     return reversed_str;
 }
 
-// Thread function to handle client communication
 void *handle_client(void *socket)
 {
     int sock = *(int *)socket;
-    free(socket);
+    free(socket); // Free the dynamically allocated memory for the socket
     char buffer[1024] = {0};
-    /* the received client data */
+    DWORD threadID = GetCurrentThreadId(); // Get the current thread ID
+    printf("New client handling process has begun. Thread ID: %lu\n", threadID);
+    // Receive client data
     int valread = recv(sock, buffer, sizeof(buffer), 0);
     if (valread <= 0)
     {
@@ -48,18 +54,37 @@ void *handle_client(void *socket)
         return NULL;
     }
 
-    char *reversed_str = reverse_echo_serve(buffer);
-    if (reversed_str == NULL)
+    // Null-terminate the received data to safely use string functions
+    buffer[valread] = '\0';
+
+    // Check if the received string is "fin"
+    if (strcmp(buffer, "fin") == 0)
     {
-        // if the handling of the reverse has failed, error out.
-        closesocket(sock);
-        return NULL;
+        /*
+        If "fin" is received, send "nif" back to the client
+        This process can take a few moments to finsh, as the win clean up does have to complete first.
+         */
+        const char *nif = "nif";
+        send(sock, nif, strlen(nif), 0);
+        serverRunning = 0;
+    }
+    else
+    {
+        // Proceed with the original logic if the message is not "fin"
+        char *reversed_str = reverse_echo_serve(buffer);
+        if (reversed_str == NULL)
+        {
+            // Handling of the reverse has failed
+            closesocket(sock);
+            return NULL;
+        }
+
+        // Send the reversed string back to the client
+        send(sock, reversed_str, strlen(reversed_str), 0);
+        free(reversed_str); // Free the dynamically allocated reversed string
     }
 
-    // Send the reverse string back to the client
-    send(sock, reversed_str, strlen(reversed_str), 0);
-    free(reversed_str);
-    closesocket(sock);
+    closesocket(sock); // Close the socket after sending the response
     return NULL;
 }
 
@@ -105,8 +130,18 @@ int main()
     }
     // Step 3: Binding the Socket
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY; // Listen to any IP address
-    address.sin_port = htons(PORT);       // Host TO Network Short byte order
+    /*
+    address.sin_addr.s_addr = INADDR_ANY; This was for testing, now to specifiy the IP on the localhost.
+    Listen to any IP address.
+     */
+    address.sin_port = htons(PORT); // Host TO Network Short byte order
+    if (inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) <= 0)
+    {
+        fprintf(stderr, "Invalid address/ Address not supported \n");
+        closesocket(server_fd);
+        WSACleanup();
+        return 1;
+    }
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) == SOCKET_ERROR)
     {
@@ -126,16 +161,24 @@ int main()
         return 1;
     }
 
-    printf("Server is listening on port %d\n", PORT);
+    char ipStr[INET_ADDRSTRLEN];                                   // Buffer to store the human-readable IP address
+    inet_ntop(AF_INET, &address.sin_addr, ipStr, INET_ADDRSTRLEN); // Convert the IP to a string
+
+    printf("Server is listening on IP %s, with port %d\n", ipStr, PORT);
 
     // Step 5: await connections and listen on the port.
-    while (1)
+    while (serverRunning)
     {
         printf("awaiting new connection...\n");
         if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) == INVALID_SOCKET)
         {
             fprintf(stderr, "Accept failed with error: %d\n", WSAGetLastError());
             continue;
+        }
+        else
+        {
+            if (!serverRunning)
+                break; // Exit loop if server is stopping
         }
 
         int *new_sock = malloc(sizeof(int));
@@ -153,7 +196,8 @@ int main()
             CloseHandle((HANDLE)threadHandle);
         }
     }
-
+    closesocket(server_fd);
     WSACleanup();
+    printf("Server shut down.\n");
     return 0;
 }
