@@ -1,20 +1,18 @@
-#include <stdio.h>      // Standard input/output definitions
-#include <stdlib.h>     // Standard library
-#include <string.h>     // Memory manipulation
-/* 
-use for linux sockets only.
-#include <unistd.h>     // POSIX operating system API
-#include <sys/types.h>  // Primitive system data types
-#include <sys/socket.h> // Internet protocol family
-#include <netinet/in.h> // Internet address family 
-*/
+#include <stdio.h>  // Standard input/output definitions
+#include <stdlib.h> // Standard library
+#include <string.h> // Memory manipulation
 #include <winsock2.h>
-#include <pthread.h>    // POSIX threads
+#include <ws2tcpip.h>
+#include <process.h>
+#include <windows.h>
 
 #define PORT 8080
 #define BACKLOG 5 // How many pending connections queue will hold
 
-// UTF-8 string reversal function
+// global vars
+volatile int serverRunning = 1;
+
+// String reversal function
 char *reverse_echo_serve(const char *str)
 {
     int len = strlen(str);
@@ -23,66 +21,81 @@ char *reverse_echo_serve(const char *str)
 
     if (reversed_str == NULL)
     {
-        perror("malloc has failed");
+        fprintf(stderr, "malloc has failed\n");
         return NULL;
     }
 
-    int index, jdex = 0;
-    /*
-    We do index = len - 1
-    because reverse string will have the extra space for the null terminator
-    and don't want to check that against and get a type miss match.
-
-    In UTF-8, any byte that begins with the binary bits 10 (which is 0x80 in hexadecimal)
-    is a continuation byte, part of a multi-byte character.
-    The mask 0xc0 (binary 11000000) is used to check the top two bits of the byte.
-     */
-    for (index = len - 1; index >= 0; --i)
+    for (int index = 0; index <= len - 1; ++index)
     {
-        if ((str[index] & 0xc0) != 0x80)
-        {
-            reversed_str[jdex++] = str[i];
-        }
+        reversed_str[index] = str[len - 1 - index];
     }
     // Insert the null terminator at the end of the string
-    reversed_str = '\0';
+    reversed_str[len] = '\0';
+
+    // Log the conversion
+    printf("Converting '%s' to '%s'\n", str, reversed_str);
 
     return reversed_str;
 }
 
-// Thread function to handle client communication
 void *handle_client(void *socket)
 {
     int sock = *(int *)socket;
+    free(socket); // Free the dynamically allocated memory for the socket
     char buffer[1024] = {0};
-    ssize_t valread;
-
-    /* the received client data */
-    valread = recv(sock, buffer, sizeof(buffer), 0);
-    if (valread < 0)
+    DWORD threadID = GetCurrentThreadId(); // Get the current thread ID
+    printf("New client handling process has begun. Thread ID: %lu\n", threadID);
+    // Receive client data
+    int valread = recv(sock, buffer, sizeof(buffer), 0);
+    if (valread <= 0)
     {
-        perror('recv failed');
-        close(sock);
+        fprintf(stderr, "recv failed with error: %d\n", WSAGetLastError());
+        closesocket(sock);
         return NULL;
     }
 
-    char *reversed_str = reverse_echo_serve(buffer);
-    if (reversed_str == NULL){
-        // if the handling of the reverse has failed, error out.
-        close(sock);
-        return NULL;
+    // Null-terminate the received data to safely use string functions
+    buffer[valread] = '\0';
+
+    // Check if the received string is "fin"
+    if (strcmp(buffer, "fin") == 0)
+    {
+        /*
+        If "fin" is received, send "nif" back to the client
+        This process can take a few moments to finsh, as the win clean up does have to complete first.
+         */
+        const char *nif = "nif";
+        send(sock, nif, strlen(nif), 0);
+        serverRunning = 0;
+    }
+    else
+    {
+        // Proceed with the original logic if the message is not "fin"
+        char *reversed_str = reverse_echo_serve(buffer);
+        if (reversed_str == NULL)
+        {
+            // Handling of the reverse has failed
+            closesocket(sock);
+            return NULL;
+        }
+
+        // Send the reversed string back to the client
+        send(sock, reversed_str, strlen(reversed_str), 0);
+        free(reversed_str); // Free the dynamically allocated reversed string
     }
 
-    // Send the reverse string back to the client
-    send(sock, reversed_str, strlen(reversed_str), 0);
-
-    free(reversed_str);
-    close(sock);
+    closesocket(sock); // Close the socket after sending the response
     return NULL;
 }
 
 int main()
 {
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
+    {
+        fprintf(stderr, "WSAStartup Failed - Error: %d\n", WSAGetLastError());
+        return 1;
+    }
     /*
     fd - file descriptor,
     its a unix/linux refernce,
@@ -100,62 +113,91 @@ int main()
     needed because of different socket functions require the address size as a param to know how much memory to read or write when dealing
     with socket addresses. */
     int addrlen = sizeof(address);
-    /* p thread t = the thraed id, we just allocate space in memory for the thread id that will be generated by p thread create fucntion.
-    The id is assged by the sytem when the thread iis successfully created, and p thread create will store the id in the space passed in. */
-    pthread_t thread_id;
 
     // Step 1: Creating a TCP socket
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
     {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "Socket crafting failed - Error: %d\n", WSAGetLastError());
+        return 1;
     }
-    // Optionally set master socket to allow multiple connections
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)))
+    // Step 2: set master socket to allow multiple connections
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0)
     {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "Setsockopt failed - Error: %d\n", WSAGetLastError());
+        closesocket(server_fd);
+        WSACleanup();
+        return 1;
     }
-    // Step 2: Binding the Socket
+    // Step 3: Binding the Socket
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY; // Listen to any IP address
-    address.sin_port = htons(PORT);       // Host TO Network Short byte order
-
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
+    /*
+    address.sin_addr.s_addr = INADDR_ANY; This was for testing, now to specifiy the IP on the localhost.
+    Listen to any IP address.
+     */
+    address.sin_port = htons(PORT); // Host TO Network Short byte order
+    if (inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) <= 0)
     {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "Invalid address/ Address not supported \n");
+        closesocket(server_fd);
+        WSACleanup();
+        return 1;
     }
 
-    // Step 3: Listening for Incoming Connections
-    if (listen(server_fd, BACKLOG) < 0)
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) == SOCKET_ERROR)
     {
-        perror("listen");
-        exit(EXIT_FAILURE);
+
+        fprintf(stderr, "Bind has failed - Error: %d\n", WSAGetLastError());
+        closesocket(server_fd);
+        WSACleanup();
+        return 1;
     }
 
-    printf("Server is listening on port %d\n", PORT);
-    while (1)
+    // Step 4: Listening for Incoming Connections
+    if (listen(server_fd, BACKLOG) == SOCKET_ERROR)
+    {
+        fprintf(stderr, "Listen has failed - Error: %d\n", WSAGetLastError());
+        closesocket(server_fd);
+        WSACleanup();
+        return 1;
+    }
+
+    char ipStr[INET_ADDRSTRLEN];                                   // Buffer to store the human-readable IP address
+    inet_ntop(AF_INET, &address.sin_addr, ipStr, INET_ADDRSTRLEN); // Convert the IP to a string
+
+    printf("Server is listening on IP %s, with port %d\n", ipStr, PORT);
+
+    // Step 5: await connections and listen on the port.
+    while (serverRunning)
     {
         printf("awaiting new connection...\n");
-        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
+        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) == INVALID_SOCKET)
         {
-            /* data */
-            perror("accept");
+            fprintf(stderr, "Accept failed with error: %d\n", WSAGetLastError());
             continue;
+        }
+        else
+        {
+            if (!serverRunning)
+                break; // Exit loop if server is stopping
         }
 
         int *new_sock = malloc(sizeof(int));
         *new_sock = new_socket;
 
-        /* handle client is a void pointer because the create function needs to abstractly point to that function to run it on the thread. */
-        // Create a new thread for each client
-        if (pthread_create(&thread_id, NULL, handle_client, (void *)new_sock) != 0)
+        unsigned threadID;
+        uintptr_t threadHandle = _beginthreadex(NULL, 0, (unsigned(__stdcall *)(void *))handle_client, (void *)new_sock, 0, &threadID);
+        if (threadHandle == 0)
         {
-            perror("pthread_create failed");
-            free(new_sock); // Don't forget to free the allocated memory if thread creation fails
+            fprintf(stderr, "_beginthreadex failed with error: %d\n", errno);
+            closesocket(new_socket);
+        }
+        else
+        {
+            CloseHandle((HANDLE)threadHandle);
         }
     }
-
+    closesocket(server_fd);
+    WSACleanup();
+    printf("Server shut down.\n");
     return 0;
 }

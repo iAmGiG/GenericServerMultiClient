@@ -3,14 +3,14 @@
         {
             "type": "shell",
             "label": "C/C++: gcc.exe build active file",
-            "command": "c:\\Users\\gigac\\Documents\\ToolsAndSoftware\\mingw\\13_2_0_POSIX\\mingw64\\bin\\gcc.exe",
+            "command": "gcc.exe",
             "args": [
                 "-fdiagnostics-color=always",
                 "-g",
-                "-pthread",
                 "${file}",
                 "-o",
-                "${fileDirname}\\${fileBasenameNoExtension}.exe"
+                "${fileDirname}\\${fileBasenameNoExtension}.exe",
+                "-lws2_32"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
