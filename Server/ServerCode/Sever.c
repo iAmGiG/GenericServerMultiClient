@@ -4,6 +4,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <process.h>
+#include <windows.h>
 
 #define PORT 8080
 #define BACKLOG 5 // How many pending connections queue will hold
@@ -11,7 +12,7 @@
 // global vars
 volatile int serverRunning = 1;
 
-// UTF-8 string reversal function
+// String reversal function
 char *reverse_echo_serve(const char *str)
 {
     int len = strlen(str);
@@ -31,6 +32,9 @@ char *reverse_echo_serve(const char *str)
     // Insert the null terminator at the end of the string
     reversed_str[len] = '\0';
 
+    // Log the conversion
+    printf("Converting '%s' to '%s'\n", str, reversed_str);
+
     return reversed_str;
 }
 
@@ -39,7 +43,8 @@ void *handle_client(void *socket)
     int sock = *(int *)socket;
     free(socket); // Free the dynamically allocated memory for the socket
     char buffer[1024] = {0};
-
+    DWORD threadID = GetCurrentThreadId(); // Get the current thread ID
+    printf("New client handling process has begun. Thread ID: %lu\n", threadID);
     // Receive client data
     int valread = recv(sock, buffer, sizeof(buffer), 0);
     if (valread <= 0)
